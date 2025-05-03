@@ -154,10 +154,11 @@ void setup()
 
 void loop()
 {
-    rVoltage = readVoltage(READER_R_PIN, RELAY_R_PIN);
-    yVoltage = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
-    bVoltage = readVoltage(READER_B_PIN, RELAY_B_PIN);
-    gVoltage = readVoltage(READER_G_PIN, RELAY_G_PIN);
+    float rV = readVoltage(READER_R_PIN, RELAY_R_PIN);
+    float yV = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
+    float bV = readVoltage(READER_B_PIN, RELAY_B_PIN);
+    float gV = readVoltage(READER_G_PIN, RELAY_G_PIN);
+    updateVoltages(rV, yV, bV, gV);
 
     Serial.printf("%.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
 
@@ -372,28 +373,24 @@ void updateVoltages(float r, float y, float b, float g)
     {
         rVoltage = r;
         wsSend("rVoltage", String(rVoltage));
-        displayNeedsUpdate = true;
     }
 
     if (abs(y - yVoltage) > __FLT_EPSILON__)
     {
         yVoltage = y;
         wsSend("yVoltage", String(yVoltage));
-        displayNeedsUpdate = true;
     }
 
     if (abs(b - bVoltage) > __FLT_EPSILON__)
     {
         bVoltage = b;
         wsSend("bVoltage", String(bVoltage));
-        displayNeedsUpdate = true;
     }
 
     if (abs(g - gVoltage) > __FLT_EPSILON__)
     {
         gVoltage = g;
         wsSend("gVoltage", String(gVoltage));
-        displayNeedsUpdate = true;
     }
 }
 
