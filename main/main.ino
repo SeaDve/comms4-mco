@@ -19,8 +19,8 @@ const uint8_t RELAY_PINS[] = {RELAY_R_PIN, RELAY_Y_PIN, RELAY_B_PIN, RELAY_G_PIN
 const int ONE_WIRE_BUS_PIN = 4;
 const int TEMP_SENSOR_PRECISION = 12;
 
-const int BUZZER = 27;
-const int BUZZER_DURATION_MS = 3000;
+const int BUZZER_PIN = 27;
+const int BUZZER_DURATION_MS = 500;
 
 const unsigned long UPDATE_INTERVAL_MS = 500;
 
@@ -217,8 +217,7 @@ void setup()
     pinMode(READER_B_PIN, INPUT_PULLUP);
     pinMode(READER_G_PIN, INPUT_PULLUP);
 
-    pinMode(BUZZER, OUTPUT);
-    digitalWrite(BUZZER, LOW);
+    pinMode(BUZZER_PIN, OUTPUT);
 
     for (int i = 0; i < 4; i++)
     {
@@ -411,12 +410,12 @@ void loop()
     if (faultDistance > 0.0 || overheatDistance > 0.0)
     {
         buzzerStartTimestamp = millis();
-        digitalWrite(BUZZER, HIGH);
+        tone(BUZZER_PIN, 1000);
     }
 
     if (buzzerStartTimestamp > 0 && millis() - buzzerStartTimestamp >= BUZZER_DURATION_MS)
     {
-        digitalWrite(BUZZER, LOW);
+        noTone(BUZZER_PIN);
         buzzerStartTimestamp = 0;
     }
 
