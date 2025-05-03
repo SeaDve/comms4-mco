@@ -19,6 +19,8 @@ const unsigned long UPDATE_INTERVAL_MS = 500;
 const char *WIFI_SSID = "GlobeAtHome_2G";
 const char *WIFI_PASSWORD = "pepot1232g";
 
+Adafruit_SSD1306 display(128, 64, &Wire);
+
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
@@ -148,6 +150,8 @@ void setup()
     baselineRVoltage = readVoltage(READER_R_PIN, RELAY_R_PIN);
     baselineYVoltage = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
     baselineGVoltage = readVoltage(READER_G_PIN, RELAY_G_PIN);
+
+    setupDisplay();
 
     setupServer();
 
