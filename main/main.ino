@@ -19,7 +19,7 @@ const uint8_t RELAY_PINS[] = {RELAY_R_PIN, RELAY_Y_PIN, RELAY_B_PIN, RELAY_G_PIN
 const int ONE_WIRE_BUS_PIN = 4;
 const int TEMP_SENSOR_PRECISION = 12;
 
-const int BUZZER = 6;
+const int BUZZER = 27;
 const int BUZZER_DURATION_MS = 3000;
 
 const unsigned long UPDATE_INTERVAL_MS = 500;
@@ -27,7 +27,7 @@ const unsigned long UPDATE_INTERVAL_MS = 500;
 const char *WIFI_SSID = "GlobeAtHome_2G";
 const char *WIFI_PASSWORD = "pepot1232g";
 
-const float TEMP_THRESHOLD = 45.0;
+const float TEMP_THRESHOLD = 40.0;
 
 Adafruit_SSD1306 display(128, 64, &Wire);
 
@@ -256,7 +256,7 @@ void loop()
         float gV = readVoltage(READER_G_PIN, RELAY_G_PIN);
         updateVoltages(rV, yV, bV, gV);
 
-        Serial.printf("%.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
+        Serial.printf("Volts: %.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
 
         bool rFault = !isAboutEqual(rVoltage, baselineRVoltage);
         bool yFault = !isAboutEqual(yVoltage, baselineYVoltage);
@@ -376,32 +376,16 @@ void loop()
         updateFaultDistance(dist);
 
         tempSensors.requestTemperatures();
-
         float t1 = tempSensors.getTempC(tempSensor1);
         float t2 = tempSensors.getTempC(tempSensor2);
         float t3 = tempSensors.getTempC(tempSensor3);
         float t4 = tempSensors.getTempC(tempSensor4);
         updateTemps(t1, t2, t3, t4);
 
-        Serial.print("Temp: ");
-        Serial.print(t1);
-        Serial.println(" ºC");
-
-        Serial.print("Temp2: ");
-        Serial.print(t2);
-        Serial.println(" ºC");
-
-        Serial.print("Temp 3: ");
-        Serial.print(t3);
-        Serial.println(" ºC");
-
-        Serial.print("Temp 4: ");
-        Serial.print(t4);
-        Serial.println(" ºC");
+        Serial.printf("Temp: %.2f, %.2f, %.2f, %.2f\n", t1, t2, t3, t4);
 
         float overheatDist;
         if (t1 > TEMP_THRESHOLD)
-
         {
             overheatDist = 2.0;
         }
@@ -514,7 +498,7 @@ void drawDisplay()
 
 void updateFault(String f)
 {
-    if (f != fault)
+    if (f.compareTo(fault) != 0)
     {
         fault = f;
         wsSend("fault", fault);
