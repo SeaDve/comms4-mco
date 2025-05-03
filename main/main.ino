@@ -1,7 +1,9 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <ESPAsyncWebServer.h>
 #include <AsyncWebSocket.h>
+#include <DallasTemperature.h>
+#include <ESPAsyncWebServer.h>
+#include <OneWire.h>
 
 const uint8_t READER_R_PIN = 34;
 const uint8_t READER_Y_PIN = 35;
@@ -14,15 +16,35 @@ const uint8_t RELAY_B_PIN = 5;
 const uint8_t RELAY_G_PIN = 18;
 const uint8_t RELAY_PINS[] = {RELAY_R_PIN, RELAY_Y_PIN, RELAY_B_PIN, RELAY_G_PIN};
 
+const int BUZZER = 6;
+const int BUZZER_DURATION_MS = 3000;
+
+const int oneWireBus = 4;
+const int oneWireBus2 = 0;
+const int oneWireBus3 = 2;
+const int oneWireBus4 = 15;
+
 const unsigned long UPDATE_INTERVAL_MS = 500;
 
 const char *WIFI_SSID = "GlobeAtHome_2G";
 const char *WIFI_PASSWORD = "pepot1232g";
 
+const float TEMP_THRESHOLD = 45.0;
+
 Adafruit_SSD1306 display(128, 64, &Wire);
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
+
+OneWire oneWire(oneWireBus);
+OneWire oneWire2(oneWireBus2);
+OneWire oneWire3(oneWireBus3);
+OneWire oneWire4(oneWireBus4);
+
+DallasTemperature tempSensor1(&oneWire);
+DallasTemperature tempSensor2(&oneWire2);
+DallasTemperature tempSensor3(&oneWire3);
+DallasTemperature tempSensor4(&oneWire4);
 
 String fault = "";
 float faultDistance = 0.0;
@@ -30,6 +52,11 @@ float rVoltage = 0.0;
 float yVoltage = 0.0;
 float bVoltage = 0.0;
 float gVoltage = 0.0;
+float temp1;
+float temp2;
+float temp3;
+float temp4;
+float overheatDistance = 0.0;
 
 float baselineRVoltage = 2.5;
 float baselineYVoltage = 2.5;
@@ -37,6 +64,14 @@ float baselineBVoltage = 2.5;
 float baselineGVoltage = 3.3;
 
 bool displayNeedsUpdate = true;
+
+void setupTempSensors()
+{
+    tempSensor1.begin();
+    tempSensor2.begin();
+    tempSensor3.begin();
+    tempSensor4.begin();
+}
 
 void setupDisplay()
 {
@@ -82,6 +117,31 @@ void onServerGetGVoltage(AsyncWebServerRequest *request)
     request->send(200, "text/plain", String(gVoltage));
 }
 
+void onServerGetTemp1(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(temp1));
+}
+
+void onServerGetTemp2(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(temp2));
+}
+
+void onServerGetTemp3(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(temp3));
+}
+
+void onServerGetTemp4(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(temp4));
+}
+
+void onServerGetOverheatDistance(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(overheatDistance));
+}
+
 void onWsEvent(AsyncWebSocket *ws, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
 {
     switch (type)
@@ -125,6 +185,11 @@ void setupServer()
     server.on("/getYVoltage", HTTP_GET, onServerGetYVoltage);
     server.on("/getBVoltage", HTTP_GET, onServerGetBVoltage);
     server.on("/getGVoltage", HTTP_GET, onServerGetGVoltage);
+    server.on("/getTemp1", HTTP_GET, onServerGetTemp1);
+    server.on("/getTemp2", HTTP_GET, onServerGetTemp2);
+    server.on("/getTemp3", HTTP_GET, onServerGetTemp3);
+    server.on("/getTemp4", HTTP_GET, onServerGetTemp4);
+    server.on("/getOverheatDistance", HTTP_GET, onServerGetOverheatDistance);
 
     ws.onEvent(onWsEvent);
     server.addHandler(&ws);
@@ -141,6 +206,9 @@ void setup()
     pinMode(READER_B_PIN, INPUT_PULLUP);
     pinMode(READER_G_PIN, INPUT_PULLUP);
 
+    pinMode(BUZZER, OUTPUT);
+    digitalWrite(BUZZER, LOW);
+
     for (int i = 0; i < 4; i++)
     {
         pinMode(RELAY_PINS[i], OUTPUT);
@@ -155,10 +223,13 @@ void setup()
 
     setupServer();
 
+    setupTempSensors();
+
     Serial.printf("Baseline: %.2f, %.2f, %.2f, %.2f\n", baselineRVoltage, baselineYVoltage, baselineBVoltage, baselineGVoltage);
 }
 
 unsigned long prevTimestamp = millis();
+unsigned long buzzerStartTimestamp = 0;
 
 void loop()
 {
@@ -292,6 +363,70 @@ void loop()
             dist = 0.0;
         }
         updateFaultDistance(dist);
+
+        tempSensor1.requestTemperatures();
+        tempSensor2.requestTemperatures();
+        tempSensor3.requestTemperatures();
+        tempSensor4.requestTemperatures();
+
+        float t1 = tempSensor1.getTempCByIndex(0);
+        float t2 = tempSensor2.getTempCByIndex(0);
+        float t3 = tempSensor3.getTempCByIndex(0);
+        float t4 = tempSensor4.getTempCByIndex(0);
+
+        updateTemps(t1, t2, t3, t4);
+
+        Serial.print("Temp: ");
+        Serial.print(t1);
+        Serial.println(" ºC");
+
+        Serial.print("Temp2: ");
+        Serial.print(t2);
+        Serial.println(" ºC");
+
+        Serial.print("Temp 3: ");
+        Serial.print(t3);
+        Serial.println(" ºC");
+
+        Serial.print("Temp 4: ");
+        Serial.print(t4);
+        Serial.println(" ºC");
+
+        float overheatDist;
+        if (t1 > TEMP_THRESHOLD)
+
+        {
+            overheatDist = 2.0
+        }
+        else if (t2 > TEMP_THRESHOLD)
+        {
+            overheatDist = 4.0;
+        }
+        else if (t3 > TEMP_THRESHOLD)
+        {
+            overheatDist = 6.0;
+        }
+        else if (t4 > TEMP_THRESHOLD)
+        {
+            overheatDist = 8.0;
+        }
+        else
+        {
+            overheatDist = 0.0;
+        }
+        updateOverheatDistance(overheatDist);
+    }
+
+    if (faultDistance > 0.0 || overheatDistance > 0.0)
+    {
+        buzzerStartTimestamp = millis();
+        digitalWrite(BUZZER, HIGH);
+    }
+
+    if (buzzerStartTimestamp > 0 && millis() - buzzerStartTimestamp >= BUZZER_DURATION_MS)
+    {
+        digitalWrite(BUZZER, LOW);
+        buzzerStartTimestamp = 0;
     }
 
     if (displayNeedsUpdate)
@@ -406,6 +541,43 @@ void updateVoltages(float r, float y, float b, float g)
     {
         gVoltage = g;
         wsSend("gVoltage", String(gVoltage));
+    }
+}
+
+void updateTemps(float t1, float t2, float t3, float t4)
+{
+    if (abs(t1 - temp1) > __FLT_EPSILON__)
+    {
+        temp1 = t1;
+        wsSend("temp1", String(temp1));
+    }
+
+    if (abs(t2 - temp2) > __FLT_EPSILON__)
+    {
+        temp2 = t2;
+        wsSend("temp2", String(temp2));
+    }
+
+    if (abs(t3 - temp3) > __FLT_EPSILON__)
+    {
+        temp3 = t3;
+        wsSend("temp3", String(temp3));
+    }
+
+    if (abs(t4 - temp4) > __FLT_EPSILON__)
+    {
+        temp4 = t4;
+        wsSend("temp4", String(temp4));
+    }
+}
+
+void updateOverheatDistance(float od)
+{
+    if (abs(od - overheatDistance) > __FLT_EPSILON__)
+    {
+        overheatDistance = od;
+        wsSend("overheatDistance", String(overheatDistance));
+        displayNeedsUpdate = true;
     }
 }
 
