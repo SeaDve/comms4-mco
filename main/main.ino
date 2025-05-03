@@ -16,13 +16,11 @@ const uint8_t RELAY_B_PIN = 5;
 const uint8_t RELAY_G_PIN = 18;
 const uint8_t RELAY_PINS[] = {RELAY_R_PIN, RELAY_Y_PIN, RELAY_B_PIN, RELAY_G_PIN};
 
+const int ONE_WIRE_BUS_PIN = 4;
+const int TEMP_SENSOR_PRECISION = 12;
+
 const int BUZZER = 6;
 const int BUZZER_DURATION_MS = 3000;
-
-const int oneWireBus = 4;
-const int oneWireBus2 = 0;
-const int oneWireBus3 = 2;
-const int oneWireBus4 = 15;
 
 const unsigned long UPDATE_INTERVAL_MS = 500;
 
@@ -36,15 +34,9 @@ Adafruit_SSD1306 display(128, 64, &Wire);
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
-OneWire oneWire(oneWireBus);
-OneWire oneWire2(oneWireBus2);
-OneWire oneWire3(oneWireBus3);
-OneWire oneWire4(oneWireBus4);
-
-DallasTemperature tempSensor1(&oneWire);
-DallasTemperature tempSensor2(&oneWire2);
-DallasTemperature tempSensor3(&oneWire3);
-DallasTemperature tempSensor4(&oneWire4);
+OneWire oneWire(ONE_WIRE_BUS_PIN);
+DallasTemperature tempSensors(&oneWire);
+DeviceAddress tempSensor1, tempSensor2, tempSensor3, tempSensor4;
 
 String fault = "";
 float faultDistance = 0.0;
@@ -52,10 +44,10 @@ float rVoltage = 0.0;
 float yVoltage = 0.0;
 float bVoltage = 0.0;
 float gVoltage = 0.0;
-float temp1;
-float temp2;
-float temp3;
-float temp4;
+float temp1 = 0.0;
+float temp2 = 0.0;
+float temp3 = 0.0;
+float temp4 = 0.0;
 float overheatDistance = 0.0;
 
 float baselineRVoltage = 2.5;
@@ -67,10 +59,29 @@ bool displayNeedsUpdate = true;
 
 void setupTempSensors()
 {
-    tempSensor1.begin();
-    tempSensor2.begin();
-    tempSensor3.begin();
-    tempSensor4.begin();
+    tempSensors.begin();
+
+    if (!tempSensors.getAddress(tempSensor1, 0))
+    {
+        Serial.println("Failed to find tempSensor1");
+    }
+    if (!tempSensors.getAddress(tempSensor2, 1))
+    {
+        Serial.println("Failed to find tempSensor2");
+    }
+    if (!tempSensors.getAddress(tempSensor3, 2))
+    {
+        Serial.println("Failed to find tempSensor3");
+    }
+    if (!tempSensors.getAddress(tempSensor4, 3))
+    {
+        Serial.println("Failed to find tempSensor4");
+    }
+
+    tempSensors.setResolution(tempSensor1, TEMP_SENSOR_PRECISION);
+    tempSensors.setResolution(tempSensor2, TEMP_SENSOR_PRECISION);
+    tempSensors.setResolution(tempSensor3, TEMP_SENSOR_PRECISION);
+    tempSensors.setResolution(tempSensor4, TEMP_SENSOR_PRECISION);
 }
 
 void setupDisplay()
@@ -364,16 +375,12 @@ void loop()
         }
         updateFaultDistance(dist);
 
-        tempSensor1.requestTemperatures();
-        tempSensor2.requestTemperatures();
-        tempSensor3.requestTemperatures();
-        tempSensor4.requestTemperatures();
+        tempSensors.requestTemperatures();
 
-        float t1 = tempSensor1.getTempCByIndex(0);
-        float t2 = tempSensor2.getTempCByIndex(0);
-        float t3 = tempSensor3.getTempCByIndex(0);
-        float t4 = tempSensor4.getTempCByIndex(0);
-
+        float t1 = tempSensors.getTempC(tempSensor1);
+        float t2 = tempSensors.getTempC(tempSensor2);
+        float t3 = tempSensors.getTempC(tempSensor3);
+        float t4 = tempSensors.getTempC(tempSensor4);
         updateTemps(t1, t2, t3, t4);
 
         Serial.print("Temp: ");
@@ -463,13 +470,12 @@ float readVoltage(uint8_t readerPin, uint8_t relayPin)
 void drawDisplay()
 {
     display.clearDisplay();
+    display.setTextSize(1);
 
     display.setCursor(0, 0);
-    display.setTextSize(1);
-    display.println("Fault");
+    display.println("Fault:");
 
     display.setCursor(0, 10);
-    display.setTextSize(2);
     if (fault != "")
     {
         display.printf(" %s\n", fault.c_str());
@@ -479,15 +485,24 @@ void drawDisplay()
         display.println("No Fault");
     }
 
-    display.setTextSize(1);
-    display.setCursor(0, 40);
-    display.println("Distance");
-    display.setCursor(0, 50);
-    display.setTextSize(2);
+    display.setCursor(0, 20);
+    display.println("Distance:");
 
+    display.setCursor(0, 30);
     if (faultDistance > 0.0)
     {
         display.printf(" %.1f m\n", faultDistance);
+    }
+    else
+    {
+        display.println("N/A");
+    }
+
+    display.setCursor(0, 40);
+    display.println("Overheat distance:");
+    if (overheatDistance > 0.0)
+    {
+        display.printf(" %.1f m\n", overheatDistance);
     }
     else
     {
