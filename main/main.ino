@@ -14,6 +14,8 @@ const uint8_t RELAY_B_PIN = 5;
 const uint8_t RELAY_G_PIN = 18;
 const uint8_t RELAY_PINS[] = {RELAY_R_PIN, RELAY_Y_PIN, RELAY_B_PIN, RELAY_G_PIN};
 
+const unsigned long UPDATE_INTERVAL_MS = 500;
+
 const char *WIFI_SSID = "GlobeAtHome_2G";
 const char *WIFI_PASSWORD = "pepot1232g";
 
@@ -152,132 +154,141 @@ void setup()
     Serial.printf("Baseline: %.2f, %.2f, %.2f, %.2f\n", baselineRVoltage, baselineYVoltage, baselineBVoltage, baselineGVoltage);
 }
 
+unsigned long prevTimestamp = millis();
+
 void loop()
 {
-    float rV = readVoltage(READER_R_PIN, RELAY_R_PIN);
-    float yV = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
-    float bV = readVoltage(READER_B_PIN, RELAY_B_PIN);
-    float gV = readVoltage(READER_G_PIN, RELAY_G_PIN);
-    updateVoltages(rV, yV, bV, gV);
+    ws.cleanupClients();
 
-    Serial.printf("%.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
-
-    bool rFault = !isAboutEqual(rVoltage, baselineRVoltage);
-    bool yFault = !isAboutEqual(yVoltage, baselineYVoltage);
-    bool bFault = !isAboutEqual(bVoltage, baselineBVoltage);
-    bool gFault = !isAboutEqual(gVoltage, baselineGVoltage);
-
-    String f;
-    if (rFault && yFault && bFault)
+    if (millis() - prevTimestamp > UPDATE_INTERVAL_MS)
     {
-        if (gFault)
+        prevTimestamp = millis();
+
+        float rV = readVoltage(READER_R_PIN, RELAY_R_PIN);
+        float yV = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
+        float bV = readVoltage(READER_B_PIN, RELAY_B_PIN);
+        float gV = readVoltage(READER_G_PIN, RELAY_G_PIN);
+        updateVoltages(rV, yV, bV, gV);
+
+        Serial.printf("%.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
+
+        bool rFault = !isAboutEqual(rVoltage, baselineRVoltage);
+        bool yFault = !isAboutEqual(yVoltage, baselineYVoltage);
+        bool bFault = !isAboutEqual(bVoltage, baselineBVoltage);
+        bool gFault = !isAboutEqual(gVoltage, baselineGVoltage);
+
+        String f;
+        if (rFault && yFault && bFault)
         {
-            f = "Sym: R-Y-B to G";
+            if (gFault)
+            {
+                f = "Sym: R-Y-B to G";
+            }
+            else
+            {
+                f = "Sym: R-Y-B";
+            }
+        }
+        else if ((rFault && yFault) || (rFault && bFault) || (yFault && bFault))
+        {
+            if (gFault)
+            {
+                if (rFault && yFault)
+                {
+                    f = "Unsym: R-Y to G";
+                }
+                else if (rFault && bFault)
+                {
+                    f = "Unsym: R-B to G";
+                }
+                else if (yFault && bFault)
+                {
+                    f = "Unsym: Y-B to G";
+                }
+            }
+            else
+            {
+                if (rFault && yFault)
+                {
+                    f = "Unsym: R-Y";
+                }
+                else if (rFault && bFault)
+                {
+                    f = "Unsym: R-B";
+                }
+                else if (yFault && bFault)
+                {
+                    f = "Unsym: Y-B";
+                }
+            }
+        }
+        else if ((rFault && gFault) || (yFault && gFault) || (bFault && gFault))
+        {
+            if (rFault && gFault)
+            {
+                f = "Unsym: R to G";
+            }
+            else if (yFault && gFault)
+            {
+                f = "Unsym: Y to G";
+            }
+            else if (bFault && gFault)
+            {
+                f = "Unsym: B to G";
+            }
+        }
+        else if (rFault || yFault || bFault || gFault)
+        {
+            f = "Open: ";
+            if (rFault)
+            {
+                f += "R ";
+            }
+            if (yFault)
+            {
+                f += "Y ";
+            }
+            if (bFault)
+            {
+                f += "B ";
+            }
+            if (gFault)
+            {
+                f += "G ";
+            }
         }
         else
         {
-            f = "Sym: R-Y-B";
+            f = "";
         }
-    }
-    else if ((rFault && yFault) || (rFault && bFault) || (yFault && bFault))
-    {
-        if (gFault)
+        updateFault(f);
+
+        float dist;
+        if (rFault || yFault || bFault || gFault)
         {
-            if (rFault && yFault)
+            if (rFault)
             {
-                f = "Unsym: R-Y to G";
+                dist = computeFaultDistance(rVoltage, baselineRVoltage);
             }
-            else if (rFault && bFault)
+            else if (yFault)
             {
-                f = "Unsym: R-B to G";
+                dist = computeFaultDistance(yVoltage, baselineYVoltage);
             }
-            else if (yFault && bFault)
+            else if (bFault)
             {
-                f = "Unsym: Y-B to G";
+                dist = computeFaultDistance(bVoltage, baselineBVoltage);
+            }
+            else if (gFault)
+            {
+                dist = computeFaultDistance(gVoltage, baselineGVoltage);
             }
         }
         else
         {
-            if (rFault && yFault)
-            {
-                f = "Unsym: R-Y";
-            }
-            else if (rFault && bFault)
-            {
-                f = "Unsym: R-B";
-            }
-            else if (yFault && bFault)
-            {
-                f = "Unsym: Y-B";
-            }
+            dist = 0.0;
         }
+        updateFaultDistance(dist);
     }
-    else if ((rFault && gFault) || (yFault && gFault) || (bFault && gFault))
-    {
-        if (rFault && gFault)
-        {
-            f = "Unsym: R to G";
-        }
-        else if (yFault && gFault)
-        {
-            f = "Unsym: Y to G";
-        }
-        else if (bFault && gFault)
-        {
-            f = "Unsym: B to G";
-        }
-    }
-    else if (rFault || yFault || bFault || gFault)
-    {
-        f = "Open: ";
-        if (rFault)
-        {
-            f += "R ";
-        }
-        if (yFault)
-        {
-            f += "Y ";
-        }
-        if (bFault)
-        {
-            f += "B ";
-        }
-        if (gFault)
-        {
-            f += "G ";
-        }
-    }
-    else
-    {
-        f = "";
-    }
-    updateFault(f);
-
-    float dist;
-    if (rFault || yFault || bFault || gFault)
-    {
-        if (rFault)
-        {
-            dist = computeFaultDistance(rVoltage, baselineRVoltage);
-        }
-        else if (yFault)
-        {
-            dist = computeFaultDistance(yVoltage, baselineYVoltage);
-        }
-        else if (bFault)
-        {
-            dist = computeFaultDistance(bVoltage, baselineBVoltage);
-        }
-        else if (gFault)
-        {
-            dist = computeFaultDistance(gVoltage, baselineGVoltage);
-        }
-    }
-    else
-    {
-        dist = 0.0;
-    }
-    updateFaultDistance(dist);
 
     if (displayNeedsUpdate)
     {
