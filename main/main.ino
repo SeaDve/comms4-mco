@@ -396,7 +396,7 @@ void loop()
         if (t1 > TEMP_THRESHOLD)
 
         {
-            overheatDist = 2.0
+            overheatDist = 2.0;
         }
         else if (t2 > TEMP_THRESHOLD)
         {
