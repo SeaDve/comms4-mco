@@ -1,7 +1,12 @@
-const uint8_t READER_R_PIN = 27;
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncWebSocket.h>
+
+const uint8_t READER_R_PIN = 34;
 const uint8_t READER_Y_PIN = 35;
 const uint8_t READER_B_PIN = 32;
-const uint8_t READER_G_PIN = 34;
+const uint8_t READER_G_PIN = 33;
 
 const uint8_t RELAY_R_PIN = 16;
 const uint8_t RELAY_Y_PIN = 17;
@@ -9,10 +14,119 @@ const uint8_t RELAY_B_PIN = 5;
 const uint8_t RELAY_G_PIN = 18;
 const uint8_t RELAY_PINS[] = {RELAY_R_PIN, RELAY_Y_PIN, RELAY_B_PIN, RELAY_G_PIN};
 
+const char *WIFI_SSID = "GlobeAtHome_2G";
+const char *WIFI_PASSWORD = "pepot1232g";
+
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+String fault = "";
+float faultDistance = 0.0;
+float rVoltage = 0.0;
+float yVoltage = 0.0;
+float bVoltage = 0.0;
+float gVoltage = 0.0;
+
 float baselineRVoltage = 2.5;
 float baselineYVoltage = 2.5;
 float baselineBVoltage = 2.5;
 float baselineGVoltage = 3.3;
+
+bool displayNeedsUpdate = true;
+
+void setupDisplay()
+{
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+    {
+        Serial.println(F("SSD1306 allocation failed"));
+    }
+
+    display.clearDisplay();
+    display.setTextColor(WHITE);
+    display.setTextWrap(false);
+
+    Serial.println(F("Display initialized"));
+}
+
+void onServerGetFault(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", fault);
+}
+
+void onServerGetFaultDistance(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(faultDistance));
+}
+
+void onServerGetRVoltage(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(rVoltage));
+}
+
+void onServerGetYVoltage(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(yVoltage));
+}
+
+void onServerGetBVoltage(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(bVoltage));
+}
+
+void onServerGetGVoltage(AsyncWebServerRequest *request)
+{
+    request->send(200, "text/plain", String(gVoltage));
+}
+
+void onWsEvent(AsyncWebSocket *ws, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
+{
+    switch (type)
+    {
+    case WS_EVT_CONNECT:
+        Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+        break;
+    case WS_EVT_DISCONNECT:
+        Serial.printf("WebSocket client #%u disconnected\n", client->id());
+        break;
+    case WS_EVT_DATA:
+    case WS_EVT_PONG:
+    case WS_EVT_ERROR:
+        break;
+    }
+}
+
+void setupServer()
+{
+    WiFi.mode(WIFI_AP);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    Serial.print("Connecting to WiFi ..");
+
+    unsigned long prevMs = 0;
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        unsigned long currMs = millis();
+        if (currMs - prevMs >= 1000)
+        {
+            Serial.print('.');
+            prevMs = currMs;
+        }
+    }
+
+    Serial.println(WiFi.localIP());
+
+    server.on("/getFault", HTTP_GET, onServerGetFault);
+    server.on("/getFaultDistance", HTTP_GET, onServerGetFaultDistance);
+    server.on("/getRVoltage", HTTP_GET, onServerGetRVoltage);
+    server.on("/getYVoltage", HTTP_GET, onServerGetYVoltage);
+    server.on("/getBVoltage", HTTP_GET, onServerGetBVoltage);
+    server.on("/getGVoltage", HTTP_GET, onServerGetGVoltage);
+
+    ws.onEvent(onWsEvent);
+    server.addHandler(&ws);
+
+    server.begin();
+}
 
 void setup()
 {
@@ -33,16 +147,17 @@ void setup()
     baselineYVoltage = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
     baselineGVoltage = readVoltage(READER_G_PIN, RELAY_G_PIN);
 
+    setupServer();
+
     Serial.printf("Baseline: %.2f, %.2f, %.2f, %.2f\n", baselineRVoltage, baselineYVoltage, baselineBVoltage, baselineGVoltage);
 }
 
 void loop()
 {
-    // detect faults
-    float rVoltage = readVoltage(READER_R_PIN, RELAY_R_PIN);
-    float yVoltage = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
-    float bVoltage = readVoltage(READER_B_PIN, RELAY_B_PIN);
-    float gVoltage = readVoltage(READER_G_PIN, RELAY_G_PIN);
+    rVoltage = readVoltage(READER_R_PIN, RELAY_R_PIN);
+    yVoltage = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
+    bVoltage = readVoltage(READER_B_PIN, RELAY_B_PIN);
+    gVoltage = readVoltage(READER_G_PIN, RELAY_G_PIN);
 
     Serial.printf("%.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
 
@@ -51,15 +166,16 @@ void loop()
     bool bFault = !isAboutEqual(bVoltage, baselineBVoltage);
     bool gFault = !isAboutEqual(gVoltage, baselineGVoltage);
 
+    String f;
     if (rFault && yFault && bFault)
     {
         if (gFault)
         {
-            Serial.println("R-Y-B-G fault detected");
+            f = "Sym: R-Y-B to G";
         }
         else
         {
-            Serial.println("R-Y-B fault detected");
+            f = "Sym: R-Y-B";
         }
     }
     else if ((rFault && yFault) || (rFault && bFault) || (yFault && bFault))
@@ -68,30 +184,30 @@ void loop()
         {
             if (rFault && yFault)
             {
-                Serial.println("R-Y to G fault detected");
+                f = "Unsym: R-Y to G";
             }
             else if (rFault && bFault)
             {
-                Serial.println("R-B to G fault detected");
+                f = "Unsym: R-B to G";
             }
             else if (yFault && bFault)
             {
-                Serial.println("Y-B to G fault detected");
+                f = "Unsym: Y-B to G";
             }
         }
         else
         {
             if (rFault && yFault)
             {
-                Serial.println("R-Y fault detected");
+                f = "Unsym: R-Y";
             }
             else if (rFault && bFault)
             {
-                Serial.println("R-B fault detected");
+                f = "Unsym: R-B";
             }
             else if (yFault && bFault)
             {
-                Serial.println("Y-B fault detected");
+                f = "Unsym: Y-B";
             }
         }
     }
@@ -99,66 +215,74 @@ void loop()
     {
         if (rFault && gFault)
         {
-            Serial.println("R to G fault detected");
+            f = "Unsym: R to G";
         }
         else if (yFault && gFault)
         {
-            Serial.println("Y to G fault detected");
+            f = "Unsym: Y to G";
         }
         else if (bFault && gFault)
         {
-            Serial.println("B to G fault detected");
+            f = "Unsym: B to G";
         }
     }
     else if (rFault || yFault || bFault || gFault)
     {
+        f = "Open: ";
         if (rFault)
         {
-            Serial.println("R fault detected");
+            f += "R ";
         }
         if (yFault)
         {
-            Serial.println("Y fault detected");
+            f += "Y ";
         }
         if (bFault)
         {
-            Serial.println("B fault detected");
+            f += "B ";
         }
         if (gFault)
         {
-            Serial.println("G fault detected");
+            f += "G ";
         }
     }
     else
     {
-        Serial.println("No faults detected");
+        f = "";
     }
+    updateFault(f);
 
+    float dist;
     if (rFault || yFault || bFault || gFault)
     {
-        float faultDistance;
-
         if (rFault)
         {
-            faultDistance = computeFaultDistance(rVoltage, baselineRVoltage);
+            dist = computeFaultDistance(rVoltage, baselineRVoltage);
         }
         else if (yFault)
         {
-            faultDistance = computeFaultDistance(yVoltage, baselineYVoltage);
+            dist = computeFaultDistance(yVoltage, baselineYVoltage);
         }
         else if (bFault)
         {
-            faultDistance = computeFaultDistance(bVoltage, baselineBVoltage);
+            dist = computeFaultDistance(bVoltage, baselineBVoltage);
         }
         else if (gFault)
         {
-            faultDistance = computeFaultDistance(gVoltage, baselineGVoltage);
+            dist = computeFaultDistance(gVoltage, baselineGVoltage);
         }
-
-        Serial.printf("Fault distance: %.2f\n", faultDistance);
     }
+    else
+    {
+        dist = 0.0;
+    }
+    updateFaultDistance(dist);
 
-    delay(1000);
+    if (displayNeedsUpdate)
+    {
+        drawDisplay();
+        displayNeedsUpdate = false;
+    }
 }
 
 float readVoltage(uint8_t readerPin, uint8_t relayPin)
@@ -183,6 +307,99 @@ float readVoltage(uint8_t readerPin, uint8_t relayPin)
     delay(50);
 
     return voltage;
+}
+
+void drawDisplay()
+{
+    display.clearDisplay();
+
+    display.setCursor(0, 0);
+    display.setTextSize(1);
+    display.println("Fault");
+
+    display.setCursor(0, 10);
+    display.setTextSize(2);
+    if (fault != "")
+    {
+        display.printf(" %s\n", fault.c_str());
+    }
+    else
+    {
+        display.println("No Fault");
+    }
+
+    display.setTextSize(1);
+    display.setCursor(0, 40);
+    display.println("Distance");
+    display.setCursor(0, 50);
+    display.setTextSize(2);
+
+    if (faultDistance > 0.0)
+    {
+        display.printf(" %.1f m\n", faultDistance);
+    }
+    else
+    {
+        display.println("N/A");
+    }
+
+    display.display();
+}
+
+void updateFault(String f)
+{
+    if (f != fault)
+    {
+        fault = f;
+        wsSend("fault", fault);
+        displayNeedsUpdate = true;
+    }
+}
+
+void updateFaultDistance(float fd)
+{
+    if (abs(fd - faultDistance) > __FLT_EPSILON__)
+    {
+        faultDistance = fd;
+        wsSend("faultDistance", String(faultDistance));
+        displayNeedsUpdate = true;
+    }
+}
+
+void updateVoltages(float r, float y, float b, float g)
+{
+    if (abs(r - rVoltage) > __FLT_EPSILON__)
+    {
+        rVoltage = r;
+        wsSend("rVoltage", String(rVoltage));
+        displayNeedsUpdate = true;
+    }
+
+    if (abs(y - yVoltage) > __FLT_EPSILON__)
+    {
+        yVoltage = y;
+        wsSend("yVoltage", String(yVoltage));
+        displayNeedsUpdate = true;
+    }
+
+    if (abs(b - bVoltage) > __FLT_EPSILON__)
+    {
+        bVoltage = b;
+        wsSend("bVoltage", String(bVoltage));
+        displayNeedsUpdate = true;
+    }
+
+    if (abs(g - gVoltage) > __FLT_EPSILON__)
+    {
+        gVoltage = g;
+        wsSend("gVoltage", String(gVoltage));
+        displayNeedsUpdate = true;
+    }
+}
+
+void wsSend(const char *dataType, String data)
+{
+    ws.printfAll("%s: %s", dataType, data.c_str());
 }
 
 float valToVoltage(uint16_t val)
