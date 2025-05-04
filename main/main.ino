@@ -27,6 +27,8 @@ const unsigned long UPDATE_INTERVAL_MS = 500;
 const char *WIFI_SSID = "GlobeAtHome_2G";
 const char *WIFI_PASSWORD = "pepot1232g";
 
+const float VOLTAGE_THRESHOLD = 0.2;
+const float FAULT_DISTANCE_TOLERANCE = 0.01;
 const float TEMP_THRESHOLD = 40.0;
 
 Adafruit_SSD1306 display(128, 64, &Wire);
@@ -245,6 +247,7 @@ void loop()
 {
     ws.cleanupClients();
 
+    bool hasFault = false;
     if (millis() - prevTimestamp > UPDATE_INTERVAL_MS)
     {
         prevTimestamp = millis();
@@ -257,13 +260,29 @@ void loop()
 
         Serial.printf("Volts: %.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
 
-        bool rFault = !isAboutEqual(rVoltage, baselineRVoltage);
-        bool yFault = !isAboutEqual(yVoltage, baselineYVoltage);
-        bool bFault = !isAboutEqual(bVoltage, baselineBVoltage);
-        bool gFault = !isAboutEqual(gVoltage, baselineGVoltage);
+        bool rFault = !isAboutEqual(rVoltage, baselineRVoltage, VOLTAGE_THRESHOLD);
+        bool yFault = !isAboutEqual(yVoltage, baselineYVoltage, VOLTAGE_THRESHOLD);
+        bool bFault = !isAboutEqual(bVoltage, baselineBVoltage, VOLTAGE_THRESHOLD);
+        bool gFault = !isAboutEqual(gVoltage, baselineGVoltage, VOLTAGE_THRESHOLD);
 
         String f;
-        if (rFault && yFault && bFault)
+        if (rFault && isAboutEqual(rVoltage, 0.0, 0.5) || (yFault && isAboutEqual(yVoltage, 0.0, 0.5)) || (bFault && isAboutEqual(bVoltage, 0.0, 0.5)))
+        {
+            f = "Open: ";
+            if (rFault)
+            {
+                f += "R ";
+            }
+            if (yFault)
+            {
+                f += "Y ";
+            }
+            if (bFault)
+            {
+                f += "B ";
+            }
+        }
+        else if (rFault && yFault && bFault)
         {
             if (gFault)
             {
@@ -322,26 +341,6 @@ void loop()
                 f = "Unsym: B to G";
             }
         }
-        else if (rFault || yFault || bFault || gFault)
-        {
-            f = "Open: ";
-            if (rFault)
-            {
-                f += "R ";
-            }
-            if (yFault)
-            {
-                f += "Y ";
-            }
-            if (bFault)
-            {
-                f += "B ";
-            }
-            if (gFault)
-            {
-                f += "G ";
-            }
-        }
         else
         {
             f = "";
@@ -351,21 +350,22 @@ void loop()
         float dist;
         if (rFault || yFault || bFault || gFault)
         {
+            hasFault = true;
             if (rFault)
             {
-                dist = computeFaultDistance(rVoltage, baselineRVoltage);
+                dist = computeFaultDistance(rVoltage, baselineRVoltage, 0.6, 0.79, 0.88, 0.94, FAULT_DISTANCE_TOLERANCE);
             }
             else if (yFault)
             {
-                dist = computeFaultDistance(yVoltage, baselineYVoltage);
+                dist = computeFaultDistance(yVoltage, baselineYVoltage, 0.46, 0.60, 0.67, 0.71, FAULT_DISTANCE_TOLERANCE);
             }
             else if (bFault)
             {
-                dist = computeFaultDistance(bVoltage, baselineBVoltage);
+                dist = computeFaultDistance(bVoltage, baselineBVoltage, 0.46, 0.60, 0.67, 0.71, FAULT_DISTANCE_TOLERANCE);
             }
             else if (gFault)
             {
-                dist = computeFaultDistance(gVoltage, baselineGVoltage);
+                dist = computeFaultDistance(gVoltage, baselineGVoltage, 0.46, 0.60, 0.67, 0.71, FAULT_DISTANCE_TOLERANCE);
             }
         }
         else
@@ -373,6 +373,8 @@ void loop()
             dist = 0.0;
         }
         updateFaultDistance(dist);
+
+        Serial.printf("Fault: %s, Distance: %.2f\n", fault.c_str(), faultDistance);
 
         tempSensors.requestTemperatures();
         float t1 = tempSensors.getTempC(tempSensor1);
@@ -407,7 +409,7 @@ void loop()
         updateOverheatDistance(overheatDist);
     }
 
-    if (faultDistance > 0.0 || overheatDistance > 0.0)
+    if (hasFault || overheatDistance > 0.0)
     {
         buzzerStartTimestamp = millis();
         tone(BUZZER_PIN, 1000);
@@ -421,7 +423,7 @@ void loop()
 
     if (displayNeedsUpdate)
     {
-        drawDisplay();
+        displayDraw();
         displayNeedsUpdate = false;
     }
 }
@@ -450,7 +452,7 @@ float readVoltage(uint8_t readerPin, uint8_t relayPin)
     return voltage;
 }
 
-void drawDisplay()
+void displayDraw()
 {
     display.clearDisplay();
     display.setTextSize(1);
@@ -474,7 +476,7 @@ void drawDisplay()
     display.setCursor(0, 30);
     if (faultDistance > 0.0)
     {
-        display.printf(" %.1f m\n", faultDistance);
+        display.printf(" %.1f km\n", faultDistance);
     }
     else
     {
@@ -485,7 +487,7 @@ void drawDisplay()
     display.println("Overheat distance:");
     if (overheatDistance > 0.0)
     {
-        display.printf(" %.1f m\n", overheatDistance);
+        display.printf(" %.1f km\n", overheatDistance);
     }
     else
     {
@@ -589,29 +591,30 @@ float valToVoltage(uint16_t val)
     return ((float)val / 4095.0) * 3.3;
 }
 
-bool isAboutEqual(float a, float b)
+bool isAboutEqual(float a, float b, float tolerance)
 {
-    return abs(a - b) < 0.2;
+    return abs(a - b) < tolerance;
 }
 
-// Return 2.0, 4.0, 6.0 or 8.0 only!
-float computeFaultDistance(float voltage, float baseline)
+float computeFaultDistance(float voltage, float baseline, float delta_2km, float delta_4km, float delta_6km, float delta_8km, float tolerance)
 {
-    if (voltage < baseline - 0.5)
+    float delta = baseline - voltage;
+
+    if (delta >= delta_2km - tolerance && delta < delta_4km + tolerance)
     {
-        return 8.0;
+        return 2.0;
     }
-    else if (voltage < baseline - 0.4)
-    {
-        return 6.0;
-    }
-    else if (voltage < baseline - 0.3)
+    else if (delta >= delta_4km - tolerance && delta < delta_6km + tolerance)
     {
         return 4.0;
     }
-    else if (voltage < baseline - 0.2)
+    else if (delta >= delta_6km - tolerance && delta < delta_8km + tolerance)
     {
-        return 2.0;
+        return 6.0;
+    }
+    else if (delta >= delta_8km - tolerance)
+    {
+        return 8.0;
     }
     else
     {
