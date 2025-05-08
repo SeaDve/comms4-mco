@@ -27,8 +27,7 @@ const unsigned long UPDATE_INTERVAL_MS = 500;
 const char *WIFI_SSID = "GlobeAtHome_2G";
 const char *WIFI_PASSWORD = "pepot1232g";
 
-const float VOLTAGE_THRESHOLD = 0.2;
-const float FAULT_DISTANCE_TOLERANCE = 0.01;
+const float VOLTAGE_THRESHOLD = 0.05;
 const float TEMP_THRESHOLD = 40.0;
 
 Adafruit_SSD1306 display(128, 64, &Wire);
@@ -50,7 +49,7 @@ float temp1 = 0.0;
 float temp2 = 0.0;
 float temp3 = 0.0;
 float temp4 = 0.0;
-float overheatDistance = 0.0;
+String overheatFault = "";
 
 float baselineRVoltage = 2.5;
 float baselineYVoltage = 2.5;
@@ -150,9 +149,9 @@ void onServerGetTemp4(AsyncWebServerRequest *request)
     request->send(200, "text/plain", String(temp4));
 }
 
-void onServerGetOverheatDistance(AsyncWebServerRequest *request)
+void onServerGetOverheatFault(AsyncWebServerRequest *request)
 {
-    request->send(200, "text/plain", String(overheatDistance));
+    request->send(200, "text/plain", String(overheatFault));
 }
 
 void onWsEvent(AsyncWebSocket *ws, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
@@ -202,7 +201,7 @@ void setupServer()
     server.on("/getTemp2", HTTP_GET, onServerGetTemp2);
     server.on("/getTemp3", HTTP_GET, onServerGetTemp3);
     server.on("/getTemp4", HTTP_GET, onServerGetTemp4);
-    server.on("/getOverheatDistance", HTTP_GET, onServerGetOverheatDistance);
+    server.on("/getOverheatFault", HTTP_GET, onServerGetOverheatFault);
 
     ws.onEvent(onWsEvent);
     server.addHandler(&ws);
@@ -226,16 +225,16 @@ void setup()
         pinMode(RELAY_PINS[i], OUTPUT);
     }
 
-    baselineBVoltage = readVoltage(READER_B_PIN, RELAY_B_PIN);
-    baselineRVoltage = readVoltage(READER_R_PIN, RELAY_R_PIN);
-    baselineYVoltage = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
-    baselineGVoltage = readVoltage(READER_G_PIN, RELAY_G_PIN);
-
     setupDisplay();
 
     setupServer();
 
     setupTempSensors();
+
+    baselineBVoltage = readVoltage(READER_B_PIN, RELAY_B_PIN);
+    baselineRVoltage = readVoltage(READER_R_PIN, RELAY_R_PIN);
+    baselineYVoltage = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
+    baselineGVoltage = readVoltage(READER_G_PIN, RELAY_G_PIN);
 
     Serial.printf("Baseline: %.2f, %.2f, %.2f, %.2f\n", baselineRVoltage, baselineYVoltage, baselineBVoltage, baselineGVoltage);
 }
@@ -247,134 +246,9 @@ void loop()
 {
     ws.cleanupClients();
 
-    bool hasFault = false;
     if (millis() - prevTimestamp > UPDATE_INTERVAL_MS)
     {
         prevTimestamp = millis();
-
-        float rV = readVoltage(READER_R_PIN, RELAY_R_PIN);
-        float yV = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
-        float bV = readVoltage(READER_B_PIN, RELAY_B_PIN);
-        float gV = readVoltage(READER_G_PIN, RELAY_G_PIN);
-        updateVoltages(rV, yV, bV, gV);
-
-        Serial.printf("Volts: %.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
-
-        bool rFault = !isAboutEqual(rVoltage, baselineRVoltage, VOLTAGE_THRESHOLD);
-        bool yFault = !isAboutEqual(yVoltage, baselineYVoltage, VOLTAGE_THRESHOLD);
-        bool bFault = !isAboutEqual(bVoltage, baselineBVoltage, VOLTAGE_THRESHOLD);
-        bool gFault = !isAboutEqual(gVoltage, baselineGVoltage, VOLTAGE_THRESHOLD);
-
-        String f;
-        if (rFault && isAboutEqual(rVoltage, 0.0, 0.5) || (yFault && isAboutEqual(yVoltage, 0.0, 0.5)) || (bFault && isAboutEqual(bVoltage, 0.0, 0.5)))
-        {
-            f = "Open: ";
-            if (rFault)
-            {
-                f += "R ";
-            }
-            if (yFault)
-            {
-                f += "Y ";
-            }
-            if (bFault)
-            {
-                f += "B ";
-            }
-        }
-        else if (rFault && yFault && bFault)
-        {
-            if (gFault)
-            {
-                f = "Sym: R-Y-B to G";
-            }
-            else
-            {
-                f = "Sym: R-Y-B";
-            }
-        }
-        else if ((rFault && yFault) || (rFault && bFault) || (yFault && bFault))
-        {
-            if (gFault)
-            {
-                if (rFault && yFault)
-                {
-                    f = "Unsym: R-Y to G";
-                }
-                else if (rFault && bFault)
-                {
-                    f = "Unsym: R-B to G";
-                }
-                else if (yFault && bFault)
-                {
-                    f = "Unsym: Y-B to G";
-                }
-            }
-            else
-            {
-                if (rFault && yFault)
-                {
-                    f = "Unsym: R-Y";
-                }
-                else if (rFault && bFault)
-                {
-                    f = "Unsym: R-B";
-                }
-                else if (yFault && bFault)
-                {
-                    f = "Unsym: Y-B";
-                }
-            }
-        }
-        else if ((rFault && gFault) || (yFault && gFault) || (bFault && gFault))
-        {
-            if (rFault && gFault)
-            {
-                f = "Unsym: R to G";
-            }
-            else if (yFault && gFault)
-            {
-                f = "Unsym: Y to G";
-            }
-            else if (bFault && gFault)
-            {
-                f = "Unsym: B to G";
-            }
-        }
-        else
-        {
-            f = "";
-        }
-        updateFault(f);
-
-        float dist;
-        if (rFault || yFault || bFault || gFault)
-        {
-            hasFault = true;
-            if (rFault)
-            {
-                dist = computeFaultDistance(rVoltage, baselineRVoltage, 0.6, 0.79, 0.88, 0.94, FAULT_DISTANCE_TOLERANCE);
-            }
-            else if (yFault)
-            {
-                dist = computeFaultDistance(yVoltage, baselineYVoltage, 0.46, 0.60, 0.67, 0.71, FAULT_DISTANCE_TOLERANCE);
-            }
-            else if (bFault)
-            {
-                dist = computeFaultDistance(bVoltage, baselineBVoltage, 0.46, 0.60, 0.67, 0.71, FAULT_DISTANCE_TOLERANCE);
-            }
-            else if (gFault)
-            {
-                dist = computeFaultDistance(gVoltage, baselineGVoltage, 0.46, 0.60, 0.67, 0.71, FAULT_DISTANCE_TOLERANCE);
-            }
-        }
-        else
-        {
-            dist = 0.0;
-        }
-        updateFaultDistance(dist);
-
-        Serial.printf("Fault: %s, Distance: %.2f\n", fault.c_str(), faultDistance);
 
         tempSensors.requestTemperatures();
         float t1 = tempSensors.getTempC(tempSensor1);
@@ -383,33 +257,137 @@ void loop()
         float t4 = tempSensors.getTempC(tempSensor4);
         updateTemps(t1, t2, t3, t4);
 
-        Serial.printf("Temp: %.2f, %.2f, %.2f, %.2f\n", t1, t2, t3, t4);
-
-        float overheatDist;
+        String overheatF = "";
         if (t1 > TEMP_THRESHOLD)
         {
-            overheatDist = 2.0;
+            overheatF += "T1 ";
         }
-        else if (t2 > TEMP_THRESHOLD)
+        if (t2 > TEMP_THRESHOLD)
         {
-            overheatDist = 4.0;
+            overheatF += "T2 ";
         }
-        else if (t3 > TEMP_THRESHOLD)
+        if (t3 > TEMP_THRESHOLD)
         {
-            overheatDist = 6.0;
+            overheatF += "T3 ";
         }
-        else if (t4 > TEMP_THRESHOLD)
+        if (t4 > TEMP_THRESHOLD)
         {
-            overheatDist = 8.0;
+            overheatF += "T4 ";
+        }
+        updateOverheatFault(overheatF);
+
+        Serial.printf("Temp: %.2f, %.2f, %.2f, %.2f\n", t1, t2, t3, t4);
+
+        if (overheatF.isEmpty())
+        {
+            float rV = readVoltage(READER_R_PIN, RELAY_R_PIN);
+            float yV = readVoltage(READER_Y_PIN, RELAY_Y_PIN);
+            float bV = readVoltage(READER_B_PIN, RELAY_B_PIN);
+            float gV = readVoltage(READER_G_PIN, RELAY_G_PIN);
+            updateVoltages(rV, yV, bV, gV);
+
+            Serial.printf("Volts: %.2f, %.2f, %.2f, %.2f\n", rVoltage, yVoltage, bVoltage, gVoltage);
+
+            bool rOpen = isAboutEqual(rVoltage, 0.0, 0.5);
+            bool yOpen = isAboutEqual(yVoltage, 0.0, 0.5);
+            bool bOpen = isAboutEqual(bVoltage, 0.0, 0.5);
+
+            bool rGShorted = isAboutEqual(rVoltage, gVoltage, VOLTAGE_THRESHOLD);
+            bool yGShorted = isAboutEqual(yVoltage, gVoltage, VOLTAGE_THRESHOLD);
+            bool bGShorted = isAboutEqual(bVoltage, gVoltage, VOLTAGE_THRESHOLD);
+
+            bool rYShorted = isAboutEqual(rVoltage, yVoltage, 0.2) && rVoltage + VOLTAGE_THRESHOLD < baselineRVoltage && yVoltage + VOLTAGE_THRESHOLD < baselineYVoltage;
+            bool yBShorted = isAboutEqual(yVoltage, bVoltage, 0.2) && yVoltage + VOLTAGE_THRESHOLD < baselineYVoltage && bVoltage + VOLTAGE_THRESHOLD < baselineBVoltage;
+            bool bRShorted = isAboutEqual(rVoltage, bVoltage, 0.2) && rVoltage + VOLTAGE_THRESHOLD < baselineRVoltage && bVoltage + VOLTAGE_THRESHOLD < baselineBVoltage;
+
+            float dist = 0.0;
+            String f = "";
+            if (rOpen || yOpen || bOpen)
+            {
+                f = "Open: ";
+                if (rOpen)
+                {
+                    f += "R ";
+                }
+                if (yOpen)
+                {
+                    f += "Y ";
+                }
+                if (bOpen)
+                {
+                    f += "B ";
+                }
+            }
+            else if (rGShorted && yGShorted && bGShorted)
+            {
+                f = "Sym: R-Y-B to G";
+                dist = computeFaultDistance(rVoltage, baselineRVoltage);
+            }
+            else if (rGShorted && yGShorted)
+            {
+                f = "Sym: R-Y to G";
+                dist = computeFaultDistance(rVoltage, baselineRVoltage);
+            }
+            else if (yGShorted && bGShorted)
+            {
+                f = "Sym: Y-B to G";
+                dist = computeFaultDistance(yVoltage, baselineYVoltage);
+            }
+            else if (rGShorted && bGShorted)
+            {
+                f = "Sym: R-B to G";
+                dist = computeFaultDistance(bVoltage, baselineBVoltage);
+            }
+            else if (rGShorted)
+            {
+                f = "Sym: R to G";
+                dist = computeFaultDistance(rVoltage, baselineRVoltage);
+            }
+            else if (yGShorted)
+            {
+                f = "Sym: Y to G";
+                dist = computeFaultDistance(yVoltage, baselineYVoltage);
+            }
+            else if (bGShorted)
+            {
+                f = "Sym: B to G";
+                dist = computeFaultDistance(bVoltage, baselineBVoltage);
+            }
+            else if ((rYShorted && bRShorted) || (yBShorted && bRShorted) || (rYShorted && yBShorted))
+            {
+                f = "Sym: R-Y-B";
+                dist = computeFaultDistance(rVoltage, baselineRVoltage);
+            }
+            else if (rYShorted)
+            {
+                f = "Sym: R-Y";
+                dist = computeFaultDistance(rVoltage, baselineRVoltage);
+            }
+            else if (bRShorted)
+            {
+                f = "Sym: R-B";
+                dist = computeFaultDistance(bVoltage, baselineBVoltage);
+            }
+            else if (yBShorted)
+            {
+                f = "Sym: Y-B";
+                dist = computeFaultDistance(yVoltage, baselineYVoltage);
+            }
+            updateFault(f);
+            updateFaultDistance(dist);
+
+            Serial.printf("Fault: %s, Distance: %.2f\n", fault.c_str(), faultDistance);
         }
         else
         {
-            overheatDist = 0.0;
+            for (int i = 0; i < 4; i++)
+            {
+                digitalWrite(RELAY_PINS[i], HIGH);
+            }
         }
-        updateOverheatDistance(overheatDist);
     }
 
-    if (hasFault || overheatDistance > 0.0)
+    if (!fault.isEmpty() || !overheatFault.isEmpty())
     {
         buzzerStartTimestamp = millis();
         tone(BUZZER_PIN, 1000);
@@ -461,38 +439,52 @@ void displayDraw()
     display.println("Fault:");
 
     display.setCursor(0, 10);
-    if (fault != "")
+    if (!fault.isEmpty())
     {
-        display.printf(" %s\n", fault.c_str());
+        display.printf("  %s\n", fault.c_str());
     }
     else
     {
-        display.println("No Fault");
+        display.println("  No Fault");
     }
 
     display.setCursor(0, 20);
-    display.println("Distance:");
+    display.println("Fault Est. Distance:");
 
     display.setCursor(0, 30);
     if (faultDistance > 0.0)
     {
-        display.printf(" %.1f km\n", faultDistance);
+        display.printf("  %.1f km\n", faultDistance);
     }
     else
     {
-        display.println("N/A");
+        display.println("  N/A");
     }
 
     display.setCursor(0, 40);
-    display.println("Overheat distance:");
-    if (overheatDistance > 0.0)
+    display.println("Overheat fault:");
+    if (!overheatFault.isEmpty())
     {
-        display.printf(" %.1f km\n", overheatDistance);
+        display.printf("  %s\n", overheatFault.c_str());
     }
     else
     {
-        display.println("N/A");
+        display.println("  N/A");
     }
+
+    display.display();
+}
+
+void displayDrawIpAddress()
+{
+    display.clearDisplay();
+    display.setTextSize(1);
+
+    display.setCursor(0, 0);
+    display.println("IP Address:");
+
+    display.setCursor(0, 10);
+    display.printf("  %s\n", WiFi.localIP().toString().c_str());
 
     display.display();
 }
@@ -571,12 +563,12 @@ void updateTemps(float t1, float t2, float t3, float t4)
     }
 }
 
-void updateOverheatDistance(float od)
+void updateOverheatFault(String overheatF)
 {
-    if (abs(od - overheatDistance) > __FLT_EPSILON__)
+    if (overheatF.compareTo(overheatFault) != 0)
     {
-        overheatDistance = od;
-        wsSend("overheatDistance", String(overheatDistance));
+        overheatFault = overheatF;
+        wsSend("overheatFault", String(overheatFault));
         displayNeedsUpdate = true;
     }
 }
@@ -596,28 +588,14 @@ bool isAboutEqual(float a, float b, float tolerance)
     return abs(a - b) < tolerance;
 }
 
-float computeFaultDistance(float voltage, float baseline, float delta_2km, float delta_4km, float delta_6km, float delta_8km, float tolerance)
+float computeFaultDistance(float voltage, float baseline)
 {
-    float delta = baseline - voltage;
+    float delta = abs(baseline - voltage);
 
-    if (delta >= delta_2km - tolerance && delta < delta_4km + tolerance)
-    {
-        return 2.0;
-    }
-    else if (delta >= delta_4km - tolerance && delta < delta_6km + tolerance)
-    {
-        return 4.0;
-    }
-    else if (delta >= delta_6km - tolerance && delta < delta_8km + tolerance)
-    {
-        return 6.0;
-    }
-    else if (delta >= delta_8km - tolerance)
-    {
-        return 8.0;
-    }
-    else
-    {
-        return 0.0;
-    }
+    return mapFloat(delta, 0.0, 1.0, 0.0, 8.0);
+}
+
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max)
+{
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
