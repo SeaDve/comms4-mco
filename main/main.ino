@@ -225,11 +225,14 @@ void setup()
         pinMode(RELAY_PINS[i], OUTPUT);
     }
 
+    setupTempSensors();
+
     setupDisplay();
 
     setupServer();
 
-    setupTempSensors();
+    displayDrawIpAddress();
+    delay(500);
 
     baselineBVoltage = readVoltage(READER_B_PIN, RELAY_B_PIN);
     baselineRVoltage = readVoltage(READER_R_PIN, RELAY_R_PIN);
@@ -401,7 +404,7 @@ void loop()
 
     if (displayNeedsUpdate)
     {
-        displayDraw();
+        displayDrawMainScreen();
         displayNeedsUpdate = false;
     }
 }
@@ -430,7 +433,7 @@ float readVoltage(uint8_t readerPin, uint8_t relayPin)
     return voltage;
 }
 
-void displayDraw()
+void displayDrawMainScreen()
 {
     display.clearDisplay();
     display.setTextSize(1);
