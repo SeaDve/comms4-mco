@@ -295,9 +295,9 @@ void loop()
             bool yOpen = isAboutEqual(yVoltage, 0.0, 0.5);
             bool bOpen = isAboutEqual(bVoltage, 0.0, 0.5);
 
-            bool rGShorted = isAboutEqual(rVoltage, gVoltage, VOLTAGE_THRESHOLD);
-            bool yGShorted = isAboutEqual(yVoltage, gVoltage, VOLTAGE_THRESHOLD);
-            bool bGShorted = isAboutEqual(bVoltage, gVoltage, VOLTAGE_THRESHOLD);
+            bool rGShorted = isAboutEqual(rVoltage, gVoltage, VOLTAGE_THRESHOLD) || (!isAboutEqual(baselineGVoltage, gVoltage, VOLTAGE_THRESHOLD) && rVoltage + 0.2 < baselineRVoltage);
+            bool yGShorted = isAboutEqual(yVoltage, gVoltage, VOLTAGE_THRESHOLD) || (!isAboutEqual(baselineGVoltage, gVoltage, VOLTAGE_THRESHOLD) && yVoltage + 0.2 < baselineYVoltage);
+            bool bGShorted = isAboutEqual(bVoltage, gVoltage, VOLTAGE_THRESHOLD) || (!isAboutEqual(baselineGVoltage, gVoltage, VOLTAGE_THRESHOLD) && bVoltage + 0.2 < baselineBVoltage);
 
             bool rYShorted = isAboutEqual(rVoltage, yVoltage, 0.2) && rVoltage + VOLTAGE_THRESHOLD < baselineRVoltage && yVoltage + VOLTAGE_THRESHOLD < baselineYVoltage;
             bool yBShorted = isAboutEqual(yVoltage, bVoltage, 0.2) && yVoltage + VOLTAGE_THRESHOLD < baselineYVoltage && bVoltage + VOLTAGE_THRESHOLD < baselineBVoltage;
